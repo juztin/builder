@@ -218,12 +218,29 @@ func readln(r *bufio.Reader) (string, error) {
 }
 
 // writeResponse buffers responses from the Docker API to stdout.
-func writeResponse(w io.Writer, r io.ReadCloser) ([]string, error) {
-	//defer r.Close()
-	ids := []string{}
+func writeResponse(w io.Writer, r io.ReadCloser) error {
 	b := bufio.NewReader(r)
 	s, err := readln(b)
 	for err == nil {
+		fmt.Fprint(w, s)
+		s, err = readln(b)
+	}
+
+	if err == nil || err == io.EOF {
+		err = nil
+		r.Close()
+	}
+	return err
+}
+
+// writeBuildResponse buffers responses from the Docker API build to stdout, capturing image ids and non-successful outputs.
+func writeBuildResponse(w io.Writer, r io.ReadCloser) ([]string, error) {
+	ids := []string{}
+	q := make([]string, 4, 4) // Queue used to retrieve the last 4 messages (used to determine successful build status)
+	b := bufio.NewReader(r)
+	s, err := readln(b)
+	for err == nil {
+		q = append(q[1:], s) // Push message onto queue
 		// Attempt to get all image ids during build.
 		if strings.HasPrefix(s, " ---> ") {
 			id := strings.TrimSpace(s[len(" ---> "):])
@@ -232,13 +249,18 @@ func writeResponse(w io.Writer, r io.ReadCloser) ([]string, error) {
 			}
 		}
 		fmt.Fprint(w, s)
+
 		s, err = readln(b)
 	}
 
-	if err == io.EOF {
+	if err == nil || err == io.EOF {
 		err = nil
 		r.Close()
+		if !strings.HasPrefix(q[len(q)-1], "Successfully tagged") {
+			err = fmt.Errorf("Build failure, missing success messages: %s", strings.Join(q, ""))
+		}
 	}
+
 	return ids, err
 }
 
@@ -323,7 +345,7 @@ func main() {
 		checkErr(err, fmt.Sprintf("Failed to stage build %s", file))
 
 		// Process stream from API.
-		ids, err = writeResponse(os.Stdout, resp.Body)
+		ids, err = writeBuildResponse(os.Stdout, resp.Body)
 		checkErr(err, fmt.Sprintf("Failed to build %s", file))
 		s.Build = time.Since(t)
 		s.Id = ids[len(ids)-1]
@@ -338,7 +360,7 @@ func main() {
 			fmt.Printf("\tTag: %s\n", tag)
 			r, err := docker.push(tag)
 			if err == nil {
-				_, err = writeResponse(os.Stdout, r)
+				err = writeResponse(os.Stdout, r)
 			}
 			checkErr(err, fmt.Sprintf("Failed to push tag %s", tag))
 		}
