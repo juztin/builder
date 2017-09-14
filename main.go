@@ -51,10 +51,13 @@ type stat struct {
 	Build, Push   time.Duration
 }
 
-// String returns the base64 encoded auth string.
-func (c authConfig) String() string {
-	b, _ := json.Marshal(c)
-	return base64.URLEncoding.EncodeToString(b)
+// Value returns the base64 encoded auth string.
+func (c authConfig) Value() (string, error) {
+	b, err := json.Marshal(c)
+	if err != nil {
+		return "", err
+	}
+	return base64.URLEncoding.EncodeToString(b), nil
 }
 
 // Write pushes the formatted stats information to the supplied writer.
@@ -69,6 +72,36 @@ func (s stat) Write(w io.Writer) error {
 		" Push Time: %s\n", s.DockerFile, s.Id, strings.Join(s.Tags, ", "), s.Architecture, s.Os, s.OsVersion, size, s.Build, s.Push)
 	_, err := w.Write([]byte(msg))
 	return err
+}
+
+// build Builds a Docker image using the given client and dockerFile, tagging the resulting image with the supplied tags.
+func (c *dockerClient) build(dockerFile string, tags []string) (types.ImageBuildResponse, string, error) {
+	options := types.ImageBuildOptions{
+		PullParent:     true,
+		NoCache:        true,
+		SuppressOutput: false,
+		Tags:           tags,
+		Remove:         true,
+		ForceRemove:    true,
+	}
+
+	ctx, err := createContext(dockerFile)
+	if err != nil {
+		return types.ImageBuildResponse{}, "", err
+	}
+	defer ctx.Close()
+	resp, err := c.ImageBuild(context.Background(), ctx, options)
+	return resp, ctx.Name(), err
+}
+
+//push pushes the the image to the registry.
+func (c *dockerClient) push(image string) (io.ReadCloser, error) {
+	auth, err := c.AuthConfig.Value()
+	if err != nil {
+		return nil, err
+	}
+	options := types.ImagePushOptions{RegistryAuth: auth}
+	return c.ImagePush(context.Background(), image, options)
 }
 
 // authConfig returns an encoded authorization string.
@@ -150,32 +183,6 @@ func createContext(dockerFile string) (*os.File, error) {
 	tar.AddAll(path, false)
 	tar.Close()
 	return os.Open(tempFile)
-}
-
-// build Builds a Docker image using the given client and dockerFile, tagging the resulting image with the supplied tags.
-func build(c *dockerClient, dockerFile string, tags []string) (types.ImageBuildResponse, string, error) {
-	options := types.ImageBuildOptions{
-		PullParent:     true,
-		NoCache:        true,
-		SuppressOutput: false,
-		Tags:           tags,
-		Remove:         true,
-		ForceRemove:    true,
-	}
-
-	ctx, err := createContext(dockerFile)
-	if err != nil {
-		return types.ImageBuildResponse{}, "", err
-	}
-	defer ctx.Close()
-	resp, err := c.ImageBuild(context.Background(), ctx, options)
-	return resp, ctx.Name(), err
-}
-
-//push pushes the the image to the registry.
-func push(c *dockerClient, image string) (io.ReadCloser, error) {
-	options := types.ImagePushOptions{RegistryAuth: c.AuthConfig.String()}
-	return c.ImagePush(context.Background(), image, options)
 }
 
 // dockerFiles returns the given files as their fully qualified path.
@@ -273,7 +280,7 @@ func arguments() (cfg authConfig, version string, fileNames []string, cleanup bo
 // checkErr outputs the error and message to stdout and exist if err is not nil.
 func checkErr(err error, msg string) {
 	if err != nil {
-		fmt.Printf(">>>> %s, %s\n", msg, err)
+		fmt.Printf("\n***** ERROR ***** \n%s\n%s\n", msg, err)
 		os.Exit(1)
 	}
 }
@@ -314,7 +321,7 @@ func main() {
 		fmt.Printf("\n########## Building: %s\n", file)
 		t := time.Now()
 		// Stage the build
-		resp, filename, err := build(docker, file, tags)
+		resp, filename, err := docker.build(file, tags)
 		checkErr(err, fmt.Sprintf("Failed to stage build %s", file))
 
 		// Process stream from API.
@@ -330,12 +337,12 @@ func main() {
 		fmt.Printf("\n########## Pushing: %s\n", file)
 		t = time.Now()
 		for _, tag := range tags {
-			fmt.Printf("\tTag: %s => %s\n", tag, authCfg.ServerAddress)
-			r, err := push(docker, tag)
+			fmt.Printf("\tTag: %s\n", tag)
+			r, err := docker.push(tag)
 			if err == nil {
 				_, err = writeResponse(os.Stdout, r)
 			}
-			checkErr(err, fmt.Sprintf("Failed to push image %s", tag))
+			checkErr(err, fmt.Sprintf("Failed to push tag %s", tag))
 		}
 		s.Push = time.Since(t)
 
