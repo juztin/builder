@@ -257,7 +257,7 @@ func writeBuildResponse(w io.Writer, r io.ReadCloser) ([]string, error) {
 		err = nil
 		r.Close()
 		if !strings.HasPrefix(q[len(q)-1], "Successfully tagged") {
-			err = fmt.Errorf("Build failure, missing success messages: %s", strings.Join(q, ""))
+			err = fmt.Errorf("Build failure, missing success messages")
 		}
 	}
 
