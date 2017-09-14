@@ -19,6 +19,7 @@ import (
 	"github.com/jhoonb/archivex"
 )
 
+// authConfig generates the Docker authentication header.
 type authConfig struct {
 	types.AuthConfig
 }
@@ -105,13 +106,12 @@ func (c *dockerClient) push(image string) (io.ReadCloser, error) {
 }
 
 // authConfig returns an encoded authorization string.
-func newAuthConfig(username, password, email, auth, registry string) authConfig {
+//func newAuthConfig(username, password, email, auth, registry string) authConfig {
+func newAuthConfig(username, password string) authConfig {
+	// TODO: Implement ability to use token authentication.
 	cfg := types.AuthConfig{
-		Auth:          auth,
-		Username:      username,
-		Password:      password,
-		Email:         email,
-		ServerAddress: registry,
+		Username: username,
+		Password: password,
 	}
 	return authConfig{cfg}
 }
@@ -246,31 +246,29 @@ func writeResponse(w io.Writer, r io.ReadCloser) ([]string, error) {
 func arguments() (cfg authConfig, version string, fileNames []string, cleanup bool) {
 	username := flag.String("username", "", "Docker registry username")
 	password := flag.String("password", "", "Docker registry password")
-	email := flag.String("email", "", "Docker registered email")
-	auth := flag.String("auth", "", "Docker registry auth")
 	ver := flag.String("version", "1.28", "Docker registry version") // just kinda randomly picked this default version.
 	clean := flag.Bool("cleanup", true, "Removes all created images")
-	registry := flag.String("registry", "", "Docker registry server (required)")
 	files := flag.String("files", "", "List of Dockerfiles to build, separated by comma (required)")
 	flag.Parse()
 
 	// Enforce that both `files` and `registry` values were supplied.
-	if *files == "" || *registry == "" {
+	if *files == "" {
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
 
 	// If any credential value was supplied, then all of them must be supplied.
-	if strings.TrimSpace(*username+*password+*email) != "" {
-		if *username == "" || *password == "" || *email == "" {
+	if strings.TrimSpace(*username+*password) != "" {
+		if *username == "" || *password == "" {
 			flag.PrintDefaults()
-			fmt.Println("Username, password, and email are required together")
+			//fmt.Println("Username, password, and email are required together")
+			fmt.Println("Username and password are required")
 			os.Exit(1)
 		}
 	}
 
 	// Create new client with authentication.
-	cfg = newAuthConfig(*username, *password, *email, *auth, *registry)
+	cfg = newAuthConfig(*username, *password)
 	fileNames = strings.Split(*files, ",")
 	version = *ver
 	cleanup = *clean

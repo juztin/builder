@@ -14,5 +14,5 @@ docker run \
 	--privileged \
 	--volume /var/run/docker.sock:/var/run/docker.sock \
 	--volume "$(pwd)":/context \
-	minty/builder -files=/context/Dockerfile -registry=dockerhub.com
+	minty/builder -files=/context/Dockerfile -username=sam -password=s3cret
 ```
